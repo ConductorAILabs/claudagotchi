@@ -132,8 +132,7 @@ def _rival_card(level: int, name: str = "Rival") -> Card:
     st["name"] = name
     st["lifetime_xp"] = pet.xp_floor(level) + 1
     st["level"] = level
-    st["upgrades"] = {"vigor": max(0, level // 6), "power": max(0, level // 5),
-                      "focus": max(0, level // 8)}
+    st["upgrades"] = {"vigor": max(0, level // 6), "power": max(0, level // 5)}
     return pet.export_card(st)
 
 

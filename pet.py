@@ -57,7 +57,7 @@ LEVEL_BASE    = 50         # cumulative-XP curve constant: C(L) = LEVEL_BASE*(L-
 EAT_WINDOW_S  = 3.0        # how long after a meal the viewer shows "eating"
 HIBERNATE_S   = 30 * 60    # idle this long with no food -> he sleeps
 
-# 6 trainings. cost(rank) = BASE*(rank+1) — repeating the same stat costs more
+# Trainings. cost(rank) = BASE*(rank+1) — repeating the same stat costs more
 # each time (its own diminishing returns). Order here is the firmware list order.
 class Upgrade(TypedDict):
     label: str
@@ -70,7 +70,7 @@ UPGRADES: dict[str, Upgrade] = {
     "guard": {"label": "Guard", "desc": "+DEF",  "base": 140},
 }
 
-# 6 foods. (name, base_tokens). Eating the SAME food repeatedly makes it less
+# Foods. (name, base_tokens). Eating the SAME food repeatedly makes it less
 # effective; effectiveness recovers over time (rewards variety).
 FOODS = [
     ("Cookie",  2500),
@@ -316,13 +316,12 @@ def level_progress(xp: int, level: int) -> tuple[int, int, float]:
 def combat_stats(level: int, upgrades: dict[str, int]) -> Stats:
     v = int(upgrades.get("vigor", 0))
     p = int(upgrades.get("power", 0))
-    f = int(upgrades.get("focus", 0))
     g = int(upgrades.get("guard", 0))
     return {
         "max_hp":  20 + level * 4 + v * 5,
         "attack":  5 + level + p * 2,
         "defense": g * 2,
-        "speed":   10 + level + f,                       # initiative
+        "speed":   10 + level,                           # initiative
         "crit":    min(0.5, 0.03 + level * 0.003 + p * 0.004),
         "type":    "NORMAL",
     }
@@ -477,12 +476,6 @@ def save(state: State) -> None:
 
 
 # ── core: feed the creature ───────────────────────────────────────────────────
-def _xp_rate(state: State) -> float:
-    """XP per token, boosted by the Focus upgrade."""
-    focus = state.get("upgrades", {}).get("focus", 0)
-    return (1.0 + focus) / TOKENS_PER_XP
-
-
 def feed(state: State, tokens: int) -> Event:
     """Add `tokens` of food. Returns a small event dict describing what changed
     (meal size, whether a level-up happened) for the viewer to animate."""
@@ -494,7 +487,7 @@ def feed(state: State, tokens: int) -> Event:
     now = _now()
 
     state["total_tokens"] += tokens
-    state["lifetime_xp"]   = int(state["total_tokens"] * _xp_rate(state))
+    state["lifetime_xp"]   = state["total_tokens"] // TOKENS_PER_XP
     state["level"]         = max(state["level"], level_for_xp(state["lifetime_xp"]))
     state["last_meal"]     = tokens
     state["last_meal_ts"]  = now

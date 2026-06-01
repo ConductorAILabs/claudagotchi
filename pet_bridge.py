@@ -61,8 +61,8 @@ def slim(state: State) -> dict[str, Any]:
         "df":  st["defense"],
         "sp":  st["speed"],
         "ac":  len(snap["achievements"]),
-        "tr":  snap["train_ranks"],   # 6 training ranks (firmware computes costs)
-        "ff":  snap["food_fresh"],    # 6 food freshness 0..9
+        "tr":  snap["train_ranks"],   # training ranks (firmware computes costs)
+        "ff":  snap["food_fresh"],    # food freshness 0..9
         # cosmetics + quest
         "sb":  sk["body"],          # body color (RGB565)
         "sa":  sk["accent"],        # accent color
