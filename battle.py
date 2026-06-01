@@ -20,8 +20,15 @@ from __future__ import annotations
 
 import json
 import sys
+from typing import Any, Callable
 
 import pet
+from pet import Card
+
+# A fighter is the mutable per-battle combat record built by mk() below.
+Fighter = dict[str, Any]
+# A battle result / report (winner, rounds, replayable log, validation issues).
+Result = dict[str, Any]
 
 # Type triangle (matches claudemon, for when skins/models map to types later).
 MATCHUP = {
@@ -33,7 +40,7 @@ MATCHUP = {
 MAX_ROUNDS = 300
 
 
-def _rng(seed: int):
+def _rng(seed: int) -> Callable[[], float]:
     """Deterministic xorshift32 -> floats in [0,1). Pure, reproducible."""
     s = seed & 0xFFFFFFFF or 0x1234
     state = [s]
@@ -58,17 +65,17 @@ def _seed_from(a_name: str, b_name: str, seed: int) -> int:
     return h & 0xFFFFFFFF
 
 
-def battle(card_a: dict, card_b: dict, seed: int = 42) -> dict:
+def battle(card_a: Card, card_b: Card, seed: int = 42) -> Result:
     """Simulate A vs B. Returns winner, rounds, a replayable log, and any
     validation issues found in either card."""
     okA, A, issuesA = pet.validate_card(card_a)
     okB, B, issuesB = pet.validate_card(card_b)
-    if not okA or not okB:
+    if not okA or not okB or A is None or B is None:
         return {"error": "invalid card", "issues": {"a": issuesA, "b": issuesB}}
 
     rnd = _rng(_seed_from(A["name"], B["name"], seed))
 
-    def mk(c):
+    def mk(c: Card) -> Fighter:
         s = c["stats"]
         return {"name": c["name"], "hp": s["max_hp"], "max_hp": s["max_hp"],
                 "atk": s["attack"], "crit": s["crit"], "speed": s["speed"],
@@ -82,7 +89,7 @@ def battle(card_a: dict, card_b: dict, seed: int = 42) -> dict:
            f"{fb['name']} (HP {fb['hp']}/ATK {fb['atk']})",
            f"{first['name']} is faster and strikes first."]
 
-    def strike(att, dfn):
+    def strike(att: Fighter, dfn: Fighter) -> None:
         variance = 0.8 + 0.4 * rnd()                  # +-20%
         crit = rnd() < att["crit"]
         mult = _type_mult(att["type"], dfn["type"])
@@ -119,7 +126,7 @@ def battle(card_a: dict, card_b: dict, seed: int = 42) -> dict:
     }
 
 
-def _rival_card(level: int, name: str = "Rival") -> dict:
+def _rival_card(level: int, name: str = "Rival") -> Card:
     """A quick opponent card for demo/testing, signed like a real one."""
     st = pet.new_state()
     st["name"] = name
@@ -130,7 +137,7 @@ def _rival_card(level: int, name: str = "Rival") -> dict:
     return pet.export_card(st)
 
 
-def _print_result(res: dict) -> None:
+def _print_result(res: Result) -> None:
     if "error" in res:
         print("ERROR:", res["error"], res.get("issues")); return
     for line in res["log"]:

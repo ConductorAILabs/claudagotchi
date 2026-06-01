@@ -9,13 +9,14 @@ Idempotent: running install twice won't add duplicates.
 import json
 import pathlib
 import sys
+from typing import Any
 
 HOOK = "/Users/jeffmiddleton/Desktop/claudagachi/hook_feed.sh"
 EVENTS = ("PostToolUse", "Stop")
 SETTINGS = pathlib.Path.home() / ".claude" / "settings.json"
 
 
-def load() -> dict:
+def load() -> dict[str, Any]:
     try:
         return json.loads(SETTINGS.read_text())
     except (OSError, json.JSONDecodeError):

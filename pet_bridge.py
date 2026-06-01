@@ -18,8 +18,10 @@ import glob
 import json
 import sys
 import time
+from typing import Any, Callable
 
 import pet
+from pet import State
 
 try:
     import serial  # pyserial
@@ -42,7 +44,7 @@ def resolve_port() -> str | None:
     return cands[0] if cands else None
 
 
-def slim(state: dict) -> dict:
+def slim(state: State) -> dict[str, Any]:
     """Short-key payload the firmware parses. Keep it well under one CDC frame."""
     snap = pet.snapshot(state)
     st   = snap["stats"]
@@ -76,7 +78,7 @@ def slim(state: dict) -> dict:
     }
 
 
-def _run(action) -> tuple:
+def _run(action: Callable[[State], tuple[bool, str]]) -> tuple[bool, str]:
     """Load state, apply `action(state)` -> (ok, msg), persist on success.
 
     Centralizes the load / save-on-ok dance every command branch shares so the

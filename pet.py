@@ -34,6 +34,17 @@ import re
 import sys
 import time
 from pathlib import Path
+from typing import Any, TypedDict
+
+# ── type aliases (dict-as-struct shapes) ─────────────────────────────────────
+# State: the persisted creature blob (see new_state for the full key list).
+# Card:  a shareable progression card (see _card_payload / export_card).
+# Stats: derived combat stats (see combat_stats).
+# Event: the small change-description feed() returns for the viewer to animate.
+State = dict[str, Any]
+Card  = dict[str, Any]
+Stats = dict[str, Any]
+Event = dict[str, Any]
 
 # ── paths ──────────────────────────────────────────────────────────────────
 HOME          = Path.home()
@@ -48,7 +59,12 @@ HIBERNATE_S   = 30 * 60    # idle this long with no food -> he sleeps
 
 # 6 trainings. cost(rank) = BASE*(rank+1) — repeating the same stat costs more
 # each time (its own diminishing returns). Order here is the firmware list order.
-UPGRADES = {
+class Upgrade(TypedDict):
+    label: str
+    desc: str
+    base: int
+
+UPGRADES: dict[str, Upgrade] = {
     "vigor": {"label": "Vigor", "desc": "+HP",   "base": 120},
     "power": {"label": "Power", "desc": "+ATK",  "base": 120},
     "guard": {"label": "Guard", "desc": "+DEF",  "base": 140},
@@ -85,7 +101,7 @@ SKINS = [
     ("Rainbow",    "#FFFFFF", "#FFFFFF", 50, True),     # firmware cycles the hue
 ]
 
-def skins_unlocked(level: int) -> list:
+def skins_unlocked(level: int) -> list[int]:
     return [i for i, s in enumerate(SKINS) if level >= s[3]]
 
 # Animation tiers — each adds an *ambient* effect around him. His face/shape
@@ -105,13 +121,13 @@ QUESTS = [
     ("The Long Compile", 30 * 60, 4200),
 ]
 
-def quest_active(state: dict) -> bool:
+def quest_active(state: State) -> bool:
     return state.get("quest_end", 0) > 0
 
-def quest_remaining(state: dict) -> int:
+def quest_remaining(state: State) -> int:
     return max(0, int(state["quest_end"] - _now())) if quest_active(state) else 0
 
-def start_quest(state: dict) -> tuple:
+def start_quest(state: State) -> tuple[bool, str]:
     if quest_active(state):
         return False, "already away"
     idx = (state.get("quest_idx", -1) + 1) % len(QUESTS)
@@ -121,7 +137,7 @@ def start_quest(state: dict) -> tuple:
     state["quest_reward"] = base + state["level"] * base // 4
     return True, f"{name} ({dur // 60}m)"
 
-def _complete_quest_if_due(state: dict):
+def _complete_quest_if_due(state: State) -> Event | None:
     """Timer up → grant the reward as a lump of food and clear the quest."""
     if quest_active(state) and _now() >= state["quest_end"]:
         reward = int(state.get("quest_reward", 0))
@@ -133,7 +149,7 @@ def _complete_quest_if_due(state: dict):
         return ev
     return None
 
-def cycle_skin(state: dict) -> tuple:
+def cycle_skin(state: State) -> tuple[bool, str]:
     unlocked = skins_unlocked(state["level"])
     if not unlocked:
         return False, "none"
@@ -142,7 +158,7 @@ def cycle_skin(state: dict) -> tuple:
     state["skin"] = nxt
     return True, SKINS[nxt][0]
 
-def set_skin(state: dict, idx: int) -> tuple:
+def set_skin(state: State, idx: int) -> tuple[bool, str]:
     idx = int(idx)
     if idx in skins_unlocked(state["level"]):
         state["skin"] = idx
@@ -152,7 +168,7 @@ def set_skin(state: dict, idx: int) -> tuple:
 # FEED action: a manual treat (small food) with a short cooldown.
 SNACK_TOKENS   = 1500
 SNACK_COOLDOWN = 45.0
-def snack(state: dict) -> tuple:
+def snack(state: State) -> tuple[bool, str]:
     if _now() - state.get("last_snack_ts", 0) < SNACK_COOLDOWN:
         return False, "still full"
     state["last_snack_ts"] = _now()
@@ -166,7 +182,7 @@ PET_BASE     = 50
 PET_COMBO    = 200
 PET_RESET_S  = 8.0       # idle this long resets the streak/diminishing
 
-def pet_spot(state: dict, spot: int) -> tuple:
+def pet_spot(state: State, spot: int) -> tuple[bool, str]:
     spot = int(spot) % 3
     now = _now()
     if now - state.get("pet_ts", 0) > PET_RESET_S:      # cold start: reset combo
@@ -193,20 +209,20 @@ def pet_spot(state: dict, spot: int) -> tuple:
     msg = f"{PET_SPOTS[spot]} +{reward}" + (" COMBO!" if combo else "")
     return True, msg
 
-def _food_uses(state: dict) -> list:
+def _food_uses(state: State) -> list[float]:
     u = state.get("food_uses")
     if not isinstance(u, list) or len(u) != len(FOODS):
         u = [0.0] * len(FOODS)
         state["food_uses"] = u
     return u
 
-def food_effectiveness(state: dict) -> list:
+def food_effectiveness(state: State) -> list[float]:
     """Current 0..1 effectiveness for each food (after time recovery, no mutation)."""
     u = _food_uses(state)
     dec = max(0.0, (_now() - state.get("food_ts", _now())) / FOOD_RECOVER_S)
     return [max(FOOD_MIN_EFF, FOOD_DECAY ** max(0.0, x - dec)) for x in u]
 
-def feed_food(state: dict, idx: int) -> tuple:
+def feed_food(state: State, idx: int) -> tuple[bool, str]:
     """Feed food #idx. Effectiveness drops the more you repeat the same food,
     and recovers over time. Returns (ok, message)."""
     idx = int(idx)
@@ -297,7 +313,7 @@ def level_progress(xp: int, level: int) -> tuple[int, int, float]:
 # ── derived battle stats ──────────────────────────────────────────────────────
 # Canonical: ALL combat stats derive from level + upgrade ranks. Nothing else is
 # trusted — this is the anti-cheat backbone (a card can't just claim hp=99999).
-def combat_stats(level: int, upgrades: dict) -> dict:
+def combat_stats(level: int, upgrades: dict[str, int]) -> Stats:
     v = int(upgrades.get("vigor", 0))
     p = int(upgrades.get("power", 0))
     f = int(upgrades.get("focus", 0))
@@ -311,7 +327,7 @@ def combat_stats(level: int, upgrades: dict) -> dict:
         "type":    "NORMAL",
     }
 
-def stats(state: dict) -> dict:
+def stats(state: State) -> Stats:
     return combat_stats(state["level"], state.get("upgrades", {}))
 
 
@@ -322,7 +338,8 @@ CARD_VERSION = 1
 _CARD_SECRET = b"claudagotchi-card-v1"
 _LEVEL_CAP   = 999
 
-def _card_payload(name, level, lxp, upgrades, skin, sub_pets) -> dict:
+def _card_payload(name: str, level: int, lxp: int, upgrades: dict[str, int],
+                  skin: int, sub_pets: list[Any]) -> Card:
     """The exact, canonical shape that gets signed — progression facts only.
     Note: NO hp/atk here. Stats are always re-derived, so they can't be forged."""
     return {
@@ -335,11 +352,11 @@ def _card_payload(name, level, lxp, upgrades, skin, sub_pets) -> dict:
         "sub_pets":     list(sub_pets),
     }
 
-def _sign(payload: dict) -> str:
+def _sign(payload: Card) -> str:
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return hmac.new(_CARD_SECRET, raw, hashlib.sha256).hexdigest()[:16]
 
-def export_card(state: dict) -> dict:
+def export_card(state: State) -> Card:
     """Serialize the pet to a shareable card. Pure data + a checksum."""
     p = _card_payload(state["name"], state["level"], state["lifetime_xp"],
                       state.get("upgrades", {}), state.get("skin", 0),
@@ -347,7 +364,7 @@ def export_card(state: dict) -> dict:
     p["sig"] = _sign(p)
     return p
 
-def _upgrade_spend(upgrades: dict) -> int:
+def _upgrade_spend(upgrades: dict[str, int]) -> int:
     """Total XP that buying these ranks would have cost (ranks 1..r)."""
     total = 0
     for k, r in upgrades.items():
@@ -355,7 +372,7 @@ def _upgrade_spend(upgrades: dict) -> int:
             total += UPGRADES[k]["base"] * (int(r) * (int(r) + 1) // 2)
     return total
 
-def validate_card(card: dict) -> tuple:
+def validate_card(card: Card) -> tuple[bool, Card | None, list[str]]:
     """Validate + normalize an untrusted card. Returns (ok, normalized, issues).
 
     Trust nothing: re-derive stats, clamp impossible values, verify the checksum.
@@ -403,7 +420,7 @@ def _now() -> float:
     return time.time()
 
 
-def new_state() -> dict:
+def new_state() -> State:
     now = _now()
     return {
         "version":         1,
@@ -438,7 +455,7 @@ def new_state() -> dict:
     }
 
 
-def load() -> dict:
+def load() -> State:
     try:
         s = json.loads(STATE_PATH.read_text())
     except (OSError, json.JSONDecodeError):
@@ -452,7 +469,7 @@ def load() -> dict:
     return s
 
 
-def save(state: dict) -> None:
+def save(state: State) -> None:
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE_PATH.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(state, separators=(",", ":")))
@@ -460,13 +477,13 @@ def save(state: dict) -> None:
 
 
 # ── core: feed the creature ───────────────────────────────────────────────────
-def _xp_rate(state: dict) -> float:
+def _xp_rate(state: State) -> float:
     """XP per token, boosted by the Focus upgrade."""
     focus = state.get("upgrades", {}).get("focus", 0)
     return (1.0 + focus) / TOKENS_PER_XP
 
 
-def feed(state: dict, tokens: int) -> dict:
+def feed(state: State, tokens: int) -> Event:
     """Add `tokens` of food. Returns a small event dict describing what changed
     (meal size, whether a level-up happened) for the viewer to animate."""
     tokens = max(0, int(tokens))
@@ -491,7 +508,7 @@ def feed(state: dict, tokens: int) -> dict:
             "to_level": state["level"]}
 
 
-def tick(state: dict, projects_root: Path = PROJECTS_ROOT) -> dict:
+def tick(state: State, projects_root: Path = PROJECTS_ROOT) -> Event:
     """Read real token usage and feed the delta since we last looked."""
     today_total = tokens_today(projects_root)
     today_date  = datetime.date.today().isoformat()
@@ -516,16 +533,16 @@ def tick(state: dict, projects_root: Path = PROJECTS_ROOT) -> dict:
 
 
 # ── XP economy (Phase 2) ──────────────────────────────────────────────────────
-def banked_xp(state: dict) -> int:
+def banked_xp(state: State) -> int:
     return max(0, state["lifetime_xp"] - state["spent_xp"])
 
 
-def upgrade_cost(state: dict, key: str) -> int:
+def upgrade_cost(state: State, key: str) -> int:
     rank = state["upgrades"].get(key, 0)
     return UPGRADES[key]["base"] * (rank + 1)
 
 
-def buy(state: dict, key: str) -> tuple[bool, str]:
+def buy(state: State, key: str) -> tuple[bool, str]:
     if key not in UPGRADES:
         return False, f"unknown upgrade '{key}'"
     cost = upgrade_cost(state, key)
@@ -546,7 +563,7 @@ _MILESTONES = [
 ]
 
 
-def _check_achievements(state: dict) -> list[str]:
+def _check_achievements(state: State) -> list[str]:
     earned = set(state.get("achievements", []))
     fresh = []
     for key, test, _label in _MILESTONES:
@@ -558,7 +575,7 @@ def _check_achievements(state: dict) -> list[str]:
 
 
 # ── status helpers for the viewer ─────────────────────────────────────────────
-def mood(state: dict) -> str:
+def mood(state: State) -> str:
     """eating | happy | content | sleepy | hibernating"""
     now = _now()
     if state["last_meal_ts"] and (now - state["last_meal_ts"]) < EAT_WINDOW_S:
@@ -574,7 +591,7 @@ def mood(state: dict) -> str:
     return "happy" if idle < 120 else "content"
 
 
-def snapshot(state: dict) -> dict:
+def snapshot(state: State) -> dict[str, Any]:
     into, span, frac = level_progress(state["lifetime_xp"], state["level"])
     lvl = state["level"]
     unlocked = skins_unlocked(lvl)
