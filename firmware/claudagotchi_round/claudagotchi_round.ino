@@ -300,13 +300,9 @@ int effMood() {                              // kept for call-compat; face is co
 // ─────────────────────────────────────────────────────────────────────────────
 //  The creature — drawn from primitives so it scales on the circle
 // ─────────────────────────────────────────────────────────────────────────────
-// The Claude mascot as an explicit BLOCK SET (edit cells freely):
-//   '#' = terracotta body   'O' = black (eyes/feet)   ' ' = empty
-// 12 cols x 11 rows, drawn as filled square blocks. Exact brand color.
-// He ALWAYS looks the same — only an occasional blink.
-// AUTHENTIC Clawd — decoded glyph-by-glyph from the real block art:
-//   ▐▛███▜▌ / ▜█████▛ / ▘▘ ▝▝   (each glyph -> 2x2 sub-pixels)
-// '#' = terracotta body, ' ' = empty. The two interior gaps on row1 are the eyes.
+// The Claude mascot as a 14x6 block grid drawn as filled square blocks.
+//   '#' = terracotta body, ' ' = empty. The two interior gaps on row 1 are the
+// eyes. He always looks the same — only an occasional blink.
 static const char* CLAWD[] = {
   " ############ ",   // 0
   " ## ###### ## ",   // 1   gaps at col 3 & 10 = eyes
@@ -321,8 +317,7 @@ static const char* CLAWD[] = {
 #define SY 15                 // sub-pixel height (6*15 = 90) — tall, like a terminal
 
 // Ambient effects unlock with level (animTier). They surround him — his face
-// and shape never change. tier: 1 blink, 2 (reserved), 3 sparkles, 4 aura,
-// 5 starfield, 6 confetti-on-levelup.
+// and shape never change. tier >=3 adds orbiting sparkles, >=5 adds a starfield.
 void drawAmbient(int tick) {
   int t = pet.animTier;
   if (t >= 5) {                                    // starfield
@@ -525,7 +520,7 @@ void drawPetScreen(int tick) {
   drawFooter();
 }
 
-// ── SCREEN 3: STYLE (unchanged — works good as is) ────────────────────────────
+// ── SCREEN 3: STYLE — skin grid ───────────────────────────────────────────────
 void drawStyle(int tick) {
   textC("STYLE", CX, 30, &FreeMonoBold12pt7b, C_ORANGE);
   // 8 swatches, 2 rows x 4 cols. Unlocked = colored; locked = grey + "Lv N".
