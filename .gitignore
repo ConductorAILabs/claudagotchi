@@ -1,0 +1,6 @@
+firmware/build/
+firmware/build_*/
+firmware/*/build/
+__pycache__/
+*.pyc
+.DS_Store

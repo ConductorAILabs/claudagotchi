@@ -1,0 +1,17 @@
+[Unit]
+Description=Token usage display server
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/chromasound/v8/token_display
+Environment=SDL_VIDEODRIVER=offscreen
+Environment=LG_WD=/tmp
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /home/pi/chromasound/v8/token_display/pi_display.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
