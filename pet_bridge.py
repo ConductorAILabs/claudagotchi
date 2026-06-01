@@ -76,53 +76,50 @@ def slim(state: dict) -> dict:
     }
 
 
+def _run(action) -> tuple:
+    """Load state, apply `action(state)` -> (ok, msg), persist on success.
+
+    Centralizes the load / save-on-ok dance every command branch shares so the
+    branches only differ in which pet.* action they call and how they log."""
+    state = pet.load()
+    ok, msg = action(state)
+    if ok:
+        pet.save(state)
+    return ok, msg
+
+
 def handle_cmd(line: str) -> bool:
     """Apply a device command. Returns True if state changed."""
     parts = line.strip().split()
     if len(parts) < 1 or parts[0] != "CMD":
         return False
     if len(parts) >= 3 and parts[1] == "BUY":
-        state = pet.load()
-        ok, msg = pet.buy(state, parts[2])
-        if ok:
-            pet.save(state)
+        ok, msg = _run(lambda s: pet.buy(s, parts[2]))
         print(f"[bridge] BUY {parts[2]}: {'ok' if ok else 'no'} ({msg})", flush=True)
         return ok
     if len(parts) >= 2 and parts[1] == "PET":
         if len(parts) >= 3 and parts[2].isdigit():   # PET <spot> = XP petting
-            state = pet.load()
-            ok, msg = pet.pet_spot(state, int(parts[2]))
-            if ok:
-                pet.save(state)
+            ok, msg = _run(lambda s: pet.pet_spot(s, int(parts[2])))
             print(f"[bridge] PET {msg}", flush=True)
             return ok
         print("[bridge] petted <3", flush=True)       # bare PET = affection
         return False
     if len(parts) >= 2 and parts[1] == "SKIN":
-        state = pet.load()
         if len(parts) >= 3 and parts[2].isdigit():
-            ok, msg = pet.set_skin(state, int(parts[2]))
+            ok, msg = _run(lambda s: pet.set_skin(s, int(parts[2])))
         else:
-            ok, msg = pet.cycle_skin(state)
-        if ok:
-            pet.save(state)
+            ok, msg = _run(pet.cycle_skin)
         print(f"[bridge] SKIN -> {msg}", flush=True)
         return ok
     if len(parts) >= 2 and parts[1] == "QUEST":
-        state = pet.load()
-        ok, msg = pet.start_quest(state)
-        if ok:
-            pet.save(state)
+        ok, msg = _run(pet.start_quest)
         print(f"[bridge] QUEST: {msg}", flush=True)
         return ok
     if len(parts) >= 2 and parts[1] == "FEED":
-        state = pet.load()
         if len(parts) >= 3 and parts[2].isdigit():
-            ok, msg = pet.feed_food(state, int(parts[2]))
+            ok, msg = _run(lambda s: pet.feed_food(s, int(parts[2])))
         else:
-            ok, msg = pet.snack(state)
-        if ok:
-            pet.save(state)
+            ok, msg = _run(pet.snack)
         print(f"[bridge] FEED: {msg}", flush=True)
         return ok
     return False
