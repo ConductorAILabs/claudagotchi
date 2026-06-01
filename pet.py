@@ -301,15 +301,13 @@ def combat_stats(level: int, upgrades: dict) -> dict:
     v = int(upgrades.get("vigor", 0))
     p = int(upgrades.get("power", 0))
     f = int(upgrades.get("focus", 0))
-    s = int(upgrades.get("swift", 0))
     g = int(upgrades.get("guard", 0))
-    l = int(upgrades.get("luck",  0))
     return {
         "max_hp":  20 + level * 4 + v * 5,
         "attack":  5 + level + p * 2,
         "defense": g * 2,
-        "speed":   10 + level + f + s * 2,              # initiative
-        "crit":    min(0.5, 0.03 + level * 0.003 + p * 0.004 + l * 0.02),
+        "speed":   10 + level + f,                       # initiative
+        "crit":    min(0.5, 0.03 + level * 0.003 + p * 0.004),
         "type":    "NORMAL",
     }
 
