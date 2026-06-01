@@ -178,9 +178,11 @@ def main() -> None:
 
                 time.sleep(POLL_S)
         finally:
+            # Closing a port that already vanished (USB yanked) raises serial/OS
+            # errors — tolerate those, but don't swallow unrelated bugs.
             try:
                 ser.close()
-            except Exception:
+            except (serial.SerialException, OSError):
                 pass
         print("[bridge] disconnected — reopening", flush=True)
         time.sleep(0.5)
