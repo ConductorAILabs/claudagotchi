@@ -11,7 +11,7 @@ import pathlib
 import sys
 from typing import Any
 
-HOOK = "/Users/jeffmiddleton/Desktop/claudagachi/hook_feed.sh"
+HOOK = str(pathlib.Path(__file__).resolve().parent / "hook_feed.sh")
 EVENTS = ("PostToolUse", "Stop")
 SETTINGS = pathlib.Path.home() / ".claude" / "settings.json"
 

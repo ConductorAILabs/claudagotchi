@@ -47,7 +47,6 @@ def resolve_port() -> str | None:
 def slim(state: State) -> dict[str, Any]:
     """Short-key payload the firmware parses. Keep it well under one CDC frame."""
     snap = pet.snapshot(state)
-    st   = snap["stats"]
     sk   = snap["skin"]
     q    = snap["quest"]
     return {
@@ -56,11 +55,6 @@ def slim(state: State) -> dict[str, Any]:
         "xf":  round(snap["xp_frac"], 3),
         "tok": snap["total_tokens"],
         "bk":  snap["banked_xp"],
-        "hp":  st["max_hp"],
-        "atk": st["attack"],
-        "df":  st["defense"],
-        "sp":  st["speed"],
-        "ac":  len(snap["achievements"]),
         "tr":  snap["train_ranks"],   # training ranks (firmware computes costs)
         "ff":  snap["food_fresh"],    # food freshness 0..9
         # cosmetics + quest
@@ -75,6 +69,8 @@ def slim(state: State) -> dict[str, Any]:
         "qr":  q["remaining"],      # seconds left
         "qn":  q["name"][:12],
         "qw":  q["reward"],
+        "qod": [o["min"] for o in q["offers"]],      # offer durations (minutes)
+        "qor": [o["reward"] for o in q["offers"]],   # offer rewards
     }
 
 
@@ -114,7 +110,8 @@ def handle_cmd(line: str) -> bool:
         print(f"[bridge] SKIN -> {msg}", flush=True)
         return ok
     if len(parts) >= 2 and parts[1] == "QUEST":
-        ok, msg = _run(pet.start_quest)
+        idx = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else 0
+        ok, msg = _run(lambda s: pet.start_quest(s, idx))
         print(f"[bridge] QUEST: {msg}", flush=True)
         return ok
     if len(parts) >= 2 and parts[1] == "FEED":
@@ -161,6 +158,8 @@ def main() -> None:
 
                 # push current state on change or heartbeat
                 state = pet.load()
+                if pet.ensure_quest_offers(state):   # fresh offers to choose when idle
+                    pet.save(state)
                 payload = json.dumps(slim(state), separators=(",", ":"))
                 now = time.monotonic()
                 changed = payload != last_payload

@@ -30,6 +30,7 @@ import hashlib
 import hmac
 import json
 import os
+import random
 import re
 import sys
 import time
@@ -112,14 +113,12 @@ ANIM_UNLOCKS = [(0, "blink"), (3, "sparkles"), (8, "sparkles2"),
 def anim_tier(level: int) -> int:
     return sum(1 for lv, _ in ANIM_UNLOCKS if level >= lv)   # 1..6
 
-# ── quests — send him off; he earns a lump reward but eats no tokens meanwhile ─
-# (name, duration_seconds, base_reward_tokens)
-QUESTS = [
-    ("Debug the Void",   5 * 60,   400),
-    ("Refactor Caverns", 10 * 60, 1000),
-    ("Token Mines",      15 * 60, 1800),
-    ("The Long Compile", 30 * 60, 4200),
-]
+# ── quests — pick from random time/XP offers; he earns a lump reward but eats
+# no tokens while away. Offers vary, so some are better value than others.
+QUEST_NAMES = ["Debug the Void", "Refactor Caverns", "Token Mines", "The Long Compile",
+               "Cache Quarry", "Stack Climb", "Heap Trek", "Null Marsh"]
+QUEST_MINUTES = [3, 5, 8, 12, 18, 25, 35]
+QUEST_OFFERS  = 3
 
 def quest_active(state: State) -> bool:
     return state.get("quest_end", 0) > 0
@@ -127,15 +126,33 @@ def quest_active(state: State) -> bool:
 def quest_remaining(state: State) -> int:
     return max(0, int(state["quest_end"] - _now())) if quest_active(state) else 0
 
-def start_quest(state: State) -> tuple[bool, str]:
+def gen_quest_offers(state: State) -> list:
+    """3 random {min, reward} offers; the reward/min rate varies so some are deals."""
+    lvl = state["level"]
+    offers = []
+    for _ in range(QUEST_OFFERS):
+        mins = random.choice(QUEST_MINUTES)
+        rate = random.uniform(0.6, 1.7)
+        offers.append({"min": mins, "reward": int(mins * (60 + lvl * 12) * rate)})
+    return offers
+
+def ensure_quest_offers(state: State) -> bool:
+    """Generate offers once when idle; returns True if it created them (so save)."""
+    if quest_active(state) or state.get("quest_offers"):
+        return False
+    state["quest_offers"] = gen_quest_offers(state)
+    return True
+
+def start_quest(state: State, idx: int = 0) -> tuple[bool, str]:
     if quest_active(state):
         return False, "already away"
-    idx = (state.get("quest_idx", -1) + 1) % len(QUESTS)
-    name, dur, base = QUESTS[idx]
-    state["quest_idx"]    = idx
-    state["quest_end"]    = _now() + dur
-    state["quest_reward"] = base + state["level"] * base // 4
-    return True, f"{name} ({dur // 60}m)"
+    offers = state.get("quest_offers") or gen_quest_offers(state)
+    o = offers[max(0, min(int(idx), len(offers) - 1))]
+    state["quest_end"]    = _now() + o["min"] * 60
+    state["quest_reward"] = int(o["reward"])
+    state["quest_name"]   = random.choice(QUEST_NAMES)
+    state["quest_offers"] = []
+    return True, f"{o['min']}m / {o['reward']} XP"
 
 def _complete_quest_if_due(state: State) -> Event | None:
     """Timer up → grant the reward as a lump of food and clear the quest."""
@@ -143,6 +160,7 @@ def _complete_quest_if_due(state: State) -> Event | None:
         reward = int(state.get("quest_reward", 0))
         state["quest_end"] = 0
         state["last_quest_done_ts"] = _now()
+        state["quest_offers"] = []          # fresh offers generated next idle tick
         ev = feed(state, reward)
         ev["quest_done"] = True
         ev["quest_reward"] = reward
@@ -447,9 +465,10 @@ def new_state() -> State:
         "sub_pets":        [],
         "achievements":    [],
         "skin":            0,
-        "quest_idx":       -1,
         "quest_end":       0.0,
         "quest_reward":    0,
+        "quest_name":      "",
+        "quest_offers":    [],
         "last_quest_done_ts": 0.0,
     }
 
@@ -592,7 +611,6 @@ def snapshot(state: State) -> dict[str, Any]:
     if sidx not in unlocked:
         sidx = 0
     sname, bodyhex, acchex, _lv, rainbow = SKINS[sidx]
-    qidx = state.get("quest_idx", -1)
     return {
         "name":         state["name"],
         "level":        lvl,
@@ -615,8 +633,10 @@ def snapshot(state: State) -> dict[str, Any]:
         "anim_tier": anim_tier(lvl),
         "quest": {"active": quest_active(state),
                   "remaining": quest_remaining(state),
-                  "name": QUESTS[qidx][0] if qidx >= 0 else "",
-                  "reward": int(state.get("quest_reward", 0))},
+                  "name": state.get("quest_name", ""),
+                  "reward": int(state.get("quest_reward", 0)),
+                  "offers": [{"min": o["min"], "reward": int(o["reward"])}
+                             for o in state.get("quest_offers", [])]},
     }
 
 

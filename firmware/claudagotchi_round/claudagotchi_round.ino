@@ -129,11 +129,6 @@ struct Pet {
   float    xp_frac  = 0.0f;    // 0..1 progress through current level
   uint32_t tokens   = 0;       // lifetime tokens eaten
   uint32_t banked   = 0;       // spendable XP
-  int      hp       = 20;
-  int      atk      = 5;
-  int      def      = 0;
-  int      spd      = 10;
-  int      ach      = 0;       // achievements unlocked
   int      trainRanks[3] = {0,0,0};         // vigor,power,guard
   int      foodFresh[4]  = {9,9,9,9};        // 0..9 per food
   int      skinIdx       = 0;                // currently selected skin
@@ -149,6 +144,9 @@ struct Pet {
   int      questRem    = 0;    // seconds left
   uint32_t questReward = 0;
   char     questName[14] = "";
+  int      offerN = 0;                 // quest offers to choose from (when idle)
+  int      offerMin[3] = {0,0,0};      // duration minutes
+  uint32_t offerRew[3] = {0,0,0};      // XP reward
 };
 Pet pet;
 bool have_data = false;
@@ -156,6 +154,8 @@ bool have_data = false;
 // animation latches
 float    shown_frac = 0.0f;
 unsigned long eat_until = 0, cheer_until = 0, pet_until = 0, flash_until = 0;
+unsigned long quest_flash_until = 0;        // quest depart/arrive: flash-all 3x
+#define QUEST_FLASH_MS 1200
 String   flash_msg;
 uint32_t last_tokens = 0;
 int      last_level = 1;
@@ -563,20 +563,28 @@ void drawTrainList() {
 }
 
 // ── SCREEN 5: QUEST INFO ──────────────────────────────────────────────────────
+#define QUEST_TOP 78
+#define QUEST_STEP 42
 void drawQuest(int tick) {
   (void)tick;
-  textC("QUEST", CX, 44, &FreeMonoBold12pt7b, C_ORANGE);
+  textC("QUEST", CX, 30, &FreeMonoBold12pt7b, C_ORANGE);          // page title
   if (pet.questActive) {
-    textC(pet.questName, CX, 92, &FreeMonoBold12pt7b, C_WHITE);
-    textC("away - not eating", CX, 114, &FreeMono9pt7b, C_DIM);
+    textC(pet.questName, CX, 96, &FreeMonoBold12pt7b, C_WHITE);
+    textC("away - not eating", CX, 118, &FreeMono9pt7b, C_DIM);
     char tw[24]; snprintf(tw, sizeof(tw), "%s...", thinkWord());
-    textC(tw, CX, 150, &FreeMonoBold12pt7b, pet.accent);
-    char r[22]; snprintf(r, sizeof(r), "reward %s tok", kfmt(pet.questReward).c_str());
-    textC(r, CX, 186, &FreeMono9pt7b, C_ORANGE2);
+    textC(tw, CX, 152, &FreeMonoBold12pt7b, pet.accent);
+    char r[22]; snprintf(r, sizeof(r), "reward %s", kfmt(pet.questReward).c_str());
+    textC(r, CX, 184, &FreeMono9pt7b, C_ORANGE2);
   } else {
-    textC("No quest right now.", CX, 104, &FreeMono9pt7b, C_DIM);
-    textC("Go get a quest!", CX, 130, &FreeMonoBold12pt7b, C_CREAM);
-    textC("press: send him off", CX, 190, &FreeMono9pt7b, C_FRAME);
+    textC("CHOOSE YOUR QUEST", CX, 52, &FreeMono9pt7b, C_CREAM);  // headline
+    for (int i = 0; i < pet.offerN; i++) {                        // random time/XP offers
+      int by = QUEST_TOP + i * QUEST_STEP;
+      gfx->fillRoundRect(CX - 84, by, 168, QUEST_STEP - 8, 7, C_TRACK);
+      char t[10]; snprintf(t, sizeof(t), "%dm", pet.offerMin[i]);
+      textL(t, CX - 74, by + (QUEST_STEP - 8) / 2 + 4, &FreeMonoBold12pt7b, C_WHITE);
+      char rw[14]; snprintf(rw, sizeof(rw), "%s XP", kfmt(pet.offerRew[i]).c_str());
+      textR(rw, CX + 76, by + (QUEST_STEP - 8) / 2 + 4, &FreeMono9pt7b, C_ORANGE);
+    }
   }
 }
 
@@ -638,7 +646,15 @@ void onTouch(int x, int y) {
       if (idx >= 0 && idx < NSKIN) sendCmd(String("SKIN ") + idx);
       return;
     }
-    case PG_QUEST: sendCmd("QUEST"); return;
+    case PG_QUEST:                                     // tap an offer to choose it
+      if (!pet.questActive && pet.offerN > 0) {
+        int row = (y - QUEST_TOP) / QUEST_STEP;
+        if (row >= 0 && row < pet.offerN) {
+          sendCmd(String("QUEST ") + row);
+          flash_msg = "off you go!"; flash_until = millis() + 1500;
+        }
+      }
+      return;
     case PG_ACTIONS:
       if (sub == 0) {                                  // tap a tile quadrant
         int t = (x > CX ? 1 : 0) + (y > CY ? 2 : 0);   // FEED0 TRAIN1 QUEST2 PET3
@@ -727,11 +743,6 @@ void parse(const String& line) {
   pet.xp_frac = doc["xf"] | 0.0f;
   pet.tokens  = doc["tok"] | 0u;
   pet.banked  = doc["bk"]  | 0u;
-  pet.hp      = doc["hp"]  | 24;
-  pet.atk     = doc["atk"] | 6;
-  pet.ach     = doc["ac"]  | 0;
-  pet.def     = doc["df"]  | 0;
-  pet.spd     = doc["sp"]  | 10;
   JsonArrayConst tr = doc["tr"]; for (int i = 0; i < NTRAIN; i++) pet.trainRanks[i] = (i < (int)tr.size()) ? (tr[i] | 0) : 0;
   JsonArrayConst ff = doc["ff"]; for (int i = 0; i < NFOOD;  i++) pet.foodFresh[i]  = (i < (int)ff.size()) ? (ff[i] | 9) : 9;
   pet.skinIdx = doc["si"] | 0;
@@ -743,12 +754,18 @@ void parse(const String& line) {
   pet.skinsUnlocked = doc["su"] | 1;
   pet.animTier      = doc["at"] | 1;
   // quest
+  bool wasQuest = pet.questActive;
   pet.questActive = (int)(doc["qa"] | 0) != 0;
   pet.questRem    = doc["qr"] | 0;
   pet.questReward = doc["qw"] | 0u;
   strlcpy(pet.questName, doc["qn"] | "", sizeof(pet.questName));
+  JsonArrayConst qod = doc["qod"]; JsonArrayConst qor = doc["qor"];
+  pet.offerN = qod.size() < 3 ? qod.size() : 3;
+  for (int i = 0; i < pet.offerN; i++) { pet.offerMin[i] = qod[i] | 0; pet.offerRew[i] = qor[i] | 0u; }
 
   if (have_data) {
+    if (pet.questActive != wasQuest)               // quest departs OR arrives
+      quest_flash_until = millis() + QUEST_FLASH_MS;
     if (pet.tokens > last_tokens) {
       eat_until = millis() + 2500;
       flash_msg = "+" + kfmt(pet.tokens - last_tokens);
@@ -760,25 +777,43 @@ void parse(const String& line) {
   Serial.println("OK");
 }
 
-// LED strip SPINS around the ring: rainbow on level-up, orange comet on XP/token
-// gain, off when idle.
+// RGB565 (the skin color over the wire) -> 8-bit components for the LED strip.
+void rgb565to888(uint16_t c, uint8_t &r, uint8_t &g, uint8_t &b) {
+  r = ((c >> 11) & 0x1F) << 3;
+  g = ((c >> 5)  & 0x3F) << 2;
+  b = ( c        & 0x1F) << 3;
+}
+
+// LED behavior:
+//  - quest depart/arrive: ALL LEDs flash 3x in the skin color (not a spin)
+//  - level up:            spinning RAINBOW ring
+//  - XP/token gain:       spinning comet in the CHARACTER's exact skin color
+//  - idle:                off
 void updateLeds() {
   unsigned long now = millis();
-  int mode = (now < cheer_until) ? 2 : (now < eat_until) ? 1 : 0;
   static int lastMode = -1;
+  uint8_t sr, sg, sb; rgb565to888(pet.body, sr, sg, sb);
+
+  if (now < quest_flash_until) {                     // flash-all 3x
+    unsigned long elapsed = QUEST_FLASH_MS - (quest_flash_until - now);
+    bool on = ((elapsed / 200) % 2) == 0;            // 200ms on/off -> 3 flashes
+    strip.fill(on ? strip.Color(sr, sg, sb) : 0);
+    strip.show(); lastMode = 3; return;
+  }
+  int mode = (now < cheer_until) ? 2 : (now < eat_until) ? 1 : 0;
   if (mode == 0) {
     if (lastMode != 0) { strip.clear(); strip.show(); }
     lastMode = 0; return;
   }
-  float head = fmodf(now / 60.0f, NUM_LEDS);         // spinning head position
+  float head = fmodf(now / 60.0f, NUM_LEDS);
   for (int i = 0; i < NUM_LEDS; i++) {
-    float d = fabsf(i - head); d = fminf(d, NUM_LEDS - d);   // circular distance
-    if (mode == 2) {                                 // spinning rainbow ring
+    float d = fabsf(i - head); d = fminf(d, NUM_LEDS - d);
+    if (mode == 2) {                                 // spinning rainbow (level up)
       uint16_t hue = (uint16_t)(((i - head) / (float)NUM_LEDS) * 65536.0f);
       strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(hue, 255, 255)));
-    } else {                                         // spinning orange comet
-      float b = fmaxf(0.06f, 1.0f - d * 0.55f);
-      strip.setPixelColor(i, strip.Color((uint8_t)(255 * b), (uint8_t)(135 * b), 0));
+    } else {                                         // spinning skin-color comet (XP gain)
+      float br = fmaxf(0.06f, 1.0f - d * 0.55f);
+      strip.setPixelColor(i, strip.Color(sr * br, sg * br, sb * br));
     }
   }
   strip.show();
