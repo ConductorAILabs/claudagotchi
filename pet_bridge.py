@@ -45,7 +45,11 @@ def resolve_port() -> str | None:
 
 
 def slim(state: State) -> dict[str, Any]:
-    """Short-key payload the firmware parses. Keep it well under one CDC frame."""
+    """Short-key payload the firmware parses. Keep it well under one CDC frame.
+
+    Built entirely from pet.snapshot() — that derived Snapshot is the single
+    source of truth, and this only renames its fields to the frozen wire keys
+    (n/lv/xf/tok/... mirrored by the firmware Pet struct in parse())."""
     snap = pet.snapshot(state)
     sk   = snap["skin"]
     q    = snap["quest"]

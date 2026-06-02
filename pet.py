@@ -38,14 +38,18 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 # ── type aliases (dict-as-struct shapes) ─────────────────────────────────────
-# State: the persisted creature blob (see new_state for the full key list).
-# Card:  a shareable progression card (see _card_payload / export_card).
-# Stats: derived combat stats (see combat_stats).
-# Event: the small change-description feed() returns for the viewer to animate.
-State = dict[str, Any]
-Card  = dict[str, Any]
-Stats = dict[str, Any]
-Event = dict[str, Any]
+# State:    the persisted creature blob (see new_state for the full key list).
+# Card:     a shareable progression card (see _card_payload / export_card).
+# Stats:    derived combat stats (see combat_stats).
+# Event:    the small change-description feed() returns for the viewer to animate.
+# Snapshot: the read-only derived view of State the viewers consume (see snapshot).
+#           pet_bridge.slim() builds the firmware wire payload purely from this, so
+#           Snapshot is the single source the on-screen short-key schema derives from.
+State    = dict[str, Any]
+Card     = dict[str, Any]
+Stats    = dict[str, Any]
+Event    = dict[str, Any]
+Snapshot = dict[str, Any]
 
 # ── paths ──────────────────────────────────────────────────────────────────
 HOME          = Path.home()
@@ -616,7 +620,7 @@ def mood(state: State) -> str:
     return "happy" if idle < 120 else "content"
 
 
-def snapshot(state: State) -> dict[str, Any]:
+def snapshot(state: State) -> Snapshot:
     into, span, frac = level_progress(state["lifetime_xp"], state["level"])
     lvl = state["level"]
     unlocked = skins_unlocked(lvl)
