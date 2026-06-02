@@ -61,9 +61,10 @@ def slim(state: State) -> dict[str, Any]:
         "sb":  sk["body"],          # body color (RGB565)
         "sa":  sk["accent"],        # accent color
         "sr":  1 if sk["rainbow"] else 0,
+        "lc":  snap["led"],         # exact 24-bit color for the LEDs
+        "an":  snap["act_n"],       # token-activity pulse (lights up even on quest)
         "sn":  sk["name"][:10],     # skin name
         "si":  sk["idx"],           # current skin index
-        "su":  sk["unlocked"],
         "at":  snap["anim_tier"],
         "qa":  1 if q["active"] else 0,
         "qr":  q["remaining"],      # seconds left

@@ -133,11 +133,12 @@ struct Pet {
   int      foodFresh[4]  = {9,9,9,9};        // 0..9 per food
   int      skinIdx       = 0;                // currently selected skin
   // cosmetics unlocked by level
-  uint16_t body    = 0xD3AA;   // mascot body color (skin)
+  uint16_t body    = 0xD3AA;   // mascot body color (skin, RGB565 for the screen)
+  uint32_t ledColor = 0xD77757;// exact 24-bit skin color for the LED strip
+  int      actN    = 0;        // token-activity pulse (lights up even on quest)
   uint16_t accent  = 0xFC20;   // accent (rim / XP)
   bool     rainbow = false;    // top skin: cycle hue
   char     skin[12] = "Terracotta";
-  int      skinsUnlocked = 1;
   int      animTier = 1;       // 1..6, gates ambient effects
   // quest
   bool     questActive = false;
@@ -692,17 +693,24 @@ void onTouch(int x, int y) {
 
 #if ENABLE_ENCODER
 unsigned long lastBtn = 0; bool btnPrev = true;
-// Robust quadrature decode: a transition table accumulates 1/4-steps; one detent
-// = 4 steps -> exactly one carousel move. Reliable in both directions.
-void pollEncoder() {
+// The encoder is read on pin-change INTERRUPTS so no detent is ever missed,
+// even during a slow screen redraw. The ISR decodes quarter-steps with a
+// transition table; one detent (4 quarter-steps) = one pending step.
+volatile int32_t encSteps = 0;
+volatile int8_t  encAcc   = 0;
+volatile uint8_t encPrev  = 0;
+void IRAM_ATTR encISR() {
   static const int8_t TBL[16] = { 0,-1,1,0, 1,0,0,-1, -1,0,0,1, 0,1,-1,0 };
-  static uint8_t prev = 0;
-  static int8_t  accum = 0;
   uint8_t cur = (digitalRead(PIN_ENC_A) << 1) | digitalRead(PIN_ENC_B);
-  accum += TBL[(prev << 2) | cur];
-  prev = cur;
-  if (accum >= 4)      { onTurn(+1); accum = 0; }
-  else if (accum <= -4) { onTurn(-1); accum = 0; }
+  encAcc += TBL[(encPrev << 2) | cur];
+  encPrev = cur;
+  if (encAcc >= 4)       { encSteps++; encAcc = 0; }
+  else if (encAcc <= -4) { encSteps--; encAcc = 0; }
+}
+void pollEncoder() {
+  noInterrupts(); int32_t s = encSteps; encSteps = 0; interrupts();
+  for (; s > 0; s--) onTurn(+1);
+  for (; s < 0; s++) onTurn(-1);
 #if (PIN_ENC_SW) >= 0
   bool btn = digitalRead(PIN_ENC_SW);
   if (!btn && btnPrev && millis() - lastBtn > 180) { onPress(); lastBtn = millis(); }
@@ -747,11 +755,12 @@ void parse(const String& line) {
   JsonArrayConst ff = doc["ff"]; for (int i = 0; i < NFOOD;  i++) pet.foodFresh[i]  = (i < (int)ff.size()) ? (ff[i] | 9) : 9;
   pet.skinIdx = doc["si"] | 0;
   // cosmetics
-  pet.body    = doc["sb"] | 0xD3AA;
+  pet.body     = doc["sb"] | 0xD3AA;
+  pet.ledColor = doc["lc"] | 0xD77757;
+  pet.actN     = doc["an"] | 0;
   pet.accent  = doc["sa"] | 0xFC20;
   pet.rainbow = (int)(doc["sr"] | 0) != 0;
   strlcpy(pet.skin, doc["sn"] | "Terracotta", sizeof(pet.skin));
-  pet.skinsUnlocked = doc["su"] | 1;
   pet.animTier      = doc["at"] | 1;
   // quest
   bool wasQuest = pet.questActive;
@@ -763,47 +772,53 @@ void parse(const String& line) {
   pet.offerN = qod.size() < 3 ? qod.size() : 3;
   for (int i = 0; i < pet.offerN; i++) { pet.offerMin[i] = qod[i] | 0; pet.offerRew[i] = qor[i] | 0u; }
 
+  static int last_actN = 0;
   if (have_data) {
     if (pet.questActive != wasQuest)               // quest departs OR arrives
       quest_flash_until = millis() + QUEST_FLASH_MS;
-    if (pet.tokens > last_tokens) {
-      eat_until = millis() + 2500;
+    if (pet.actN != last_actN)                     // token activity -> LED lights up
+      eat_until = millis() + 2500;                 // (fires even while on a quest)
+    if (pet.tokens > last_tokens) {                // credited eating -> "+X" flash
       flash_msg = "+" + kfmt(pet.tokens - last_tokens);
       flash_until = millis() + 2200;
     }
     if (pet.level > last_level) cheer_until = millis() + 2800;
   }
+  last_actN = pet.actN;
   have_data = true;
   Serial.println("OK");
 }
 
-// RGB565 (the skin color over the wire) -> 8-bit components for the LED strip.
-void rgb565to888(uint16_t c, uint8_t &r, uint8_t &g, uint8_t &b) {
-  r = ((c >> 11) & 0x1F) << 3;
-  g = ((c >> 5)  & 0x3F) << 2;
-  b = ( c        & 0x1F) << 3;
-}
-
-// LED behavior:
-//  - quest depart/arrive: ALL LEDs flash 3x in the skin color (not a spin)
+// LED behavior (color comes from pet.ledColor — the EXACT 24-bit skin color,
+// gamma-corrected so it reads true on the WS2812s instead of washed/blue):
+//  - quest depart/arrive: ALL LEDs flash 3x in the skin color
+//  - XP/token gain:       spinning comet in the skin color (fires even on a quest)
 //  - level up:            spinning RAINBOW ring
-//  - XP/token gain:       spinning comet in the CHARACTER's exact skin color
-//  - idle:                off
+//  - on a quest (idle):   slow breathing glow in the skin color
+//  - otherwise:           off
 void updateLeds() {
   unsigned long now = millis();
   static int lastMode = -1;
-  uint8_t sr, sg, sb; rgb565to888(pet.body, sr, sg, sb);
+  // gamma-correct the exact skin color once
+  uint8_t sr = Adafruit_NeoPixel::gamma8((pet.ledColor >> 16) & 0xFF);
+  uint8_t sg = Adafruit_NeoPixel::gamma8((pet.ledColor >> 8)  & 0xFF);
+  uint8_t sb = Adafruit_NeoPixel::gamma8( pet.ledColor        & 0xFF);
 
-  if (now < quest_flash_until) {                     // flash-all 3x
+  if (now < quest_flash_until) {                     // flash-all 3x (depart/arrive)
     unsigned long elapsed = QUEST_FLASH_MS - (quest_flash_until - now);
-    bool on = ((elapsed / 200) % 2) == 0;            // 200ms on/off -> 3 flashes
+    bool on = ((elapsed / 200) % 2) == 0;
     strip.fill(on ? strip.Color(sr, sg, sb) : 0);
-    strip.show(); lastMode = 3; return;
+    strip.show(); lastMode = 4; return;
   }
-  int mode = (now < cheer_until) ? 2 : (now < eat_until) ? 1 : 0;
+  int mode = (now < eat_until) ? 1 : (now < cheer_until) ? 2 : (pet.questActive) ? 3 : 0;
   if (mode == 0) {
     if (lastMode != 0) { strip.clear(); strip.show(); }
     lastMode = 0; return;
+  }
+  if (mode == 3) {                                   // slow breathing glow while away
+    float p = 0.20f + 0.22f * sinf(now * 0.003f);
+    strip.fill(strip.Color(sr * p, sg * p, sb * p));
+    strip.show(); lastMode = 3; return;
   }
   float head = fmodf(now / 60.0f, NUM_LEDS);
   for (int i = 0; i < NUM_LEDS; i++) {
@@ -831,6 +846,9 @@ void setup() {
   pinMode(PIN_BL, OUTPUT); digitalWrite(PIN_BL, HIGH);
 #if ENABLE_ENCODER
   pinMode(PIN_ENC_A, INPUT_PULLUP); pinMode(PIN_ENC_B, INPUT_PULLUP);
+  encPrev = (digitalRead(PIN_ENC_A) << 1) | digitalRead(PIN_ENC_B);
+  attachInterrupt(digitalPinToInterrupt(PIN_ENC_A), encISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(PIN_ENC_B), encISR, CHANGE);
   #if (PIN_ENC_SW) >= 0
   pinMode(PIN_ENC_SW, INPUT_PULLUP);
   #endif

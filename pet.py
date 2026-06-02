@@ -448,6 +448,7 @@ def new_state() -> State:
         "spent_xp":        0,
         "level":           0,
         "last_snack_ts":   0.0,
+        "act_n":           0,
         "food_uses":       [0.0] * len(FOODS),
         "food_ts":         0.0,
         "pet_last":        -1,
@@ -533,8 +534,13 @@ def tick(state: State, projects_root: Path = PROJECTS_ROOT) -> Event:
     state["last_seen_today"] = today_total
     state["last_seen_date"]  = today_date
 
-    # Away on a quest: he doesn't eat. Advance the counter (so tokens earned
-    # while away aren't dumped on him on return); reward lands when the timer's up.
+    # Token-activity pulse — bumped on ANY real usage (even during a quest) so the
+    # LEDs can light up on XP/token activity regardless of whether it's credited.
+    if delta > 0:
+        state["act_n"] = state.get("act_n", 0) + 1
+
+    # Away on a quest: he doesn't eat (no XP credit). Advance the counter so tokens
+    # earned while away aren't dumped on him on return; reward lands when due.
     if quest_active(state):
         done = _complete_quest_if_due(state)
         if done:
@@ -631,6 +637,8 @@ def snapshot(state: State) -> dict[str, Any]:
                  "accent": rgb565(acchex), "rainbow": rainbow,
                  "unlocked": len(unlocked), "total": len(SKINS)},
         "anim_tier": anim_tier(lvl),
+        "act_n":     state.get("act_n", 0),
+        "led":       int(bodyhex.lstrip("#"), 16),     # exact 24-bit skin color for the LEDs
         "quest": {"active": quest_active(state),
                   "remaining": quest_remaining(state),
                   "name": state.get("quest_name", ""),
