@@ -244,12 +244,6 @@ const char* thinkWord() { return THINK_WORDS[(millis() / 120000UL) % THINK_N]; }
 // ─────────────────────────────────────────────────────────────────────────────
 //  Helpers
 // ─────────────────────────────────────────────────────────────────────────────
-String commas(uint32_t n) {
-  char b[16]; snprintf(b, sizeof(b), "%lu", (unsigned long)n);
-  String s = b, o; int len = s.length();
-  for (int i = 0; i < len; i++) { if (i && (len - i) % 3 == 0) o += ','; o += s[i]; }
-  return o;
-}
 String kfmt(uint32_t n) {
   char b[16];
   if (n >= 1000000UL) snprintf(b, sizeof(b), "%.1fM", n / 1e6);
@@ -294,9 +288,6 @@ uint16_t hsv565(float h, float s, float v) {
   uint8_t R=(r+m)*255, G=(g+m)*255, B=(b+m)*255;
   return ((R&0xF8)<<8)|((G&0xFC)<<3)|(B>>3);
 }
-int effMood() {                              // kept for call-compat; face is constant
-  return 0;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  The creature — drawn from primitives so it scales on the circle
@@ -316,26 +307,6 @@ static const char* CLAWD[] = {
 #define CLAWD_H 6
 #define SX 9                  // sub-pixel width  (14*9  = 126)
 #define SY 15                 // sub-pixel height (6*15 = 90) — tall, like a terminal
-
-// Ambient effects unlock with level (animTier). They surround him — his face
-// and shape never change. tier >=3 adds orbiting sparkles, >=5 adds a starfield.
-void drawAmbient(int tick) {
-  int t = pet.animTier;
-  if (t >= 5) {                                    // starfield
-    for (int i = 0; i < 18; i++) {
-      float a = i * 2.39996f, rr = 86 + (i * 13 % 28);
-      int x = CX + cosf(a + tick * 0.002f) * rr;
-      int y = CY + sinf(a + tick * 0.002f) * rr;
-      if ((i + tick / 20) % 3 == 0) gfx->drawPixel(x, y, C_DIM);
-    }
-  }
-  if (t >= 3) {                                    // orbiting sparkles
-    for (int i = 0; i < 3; i++) {
-      float a = tick * 0.05f + i * 2.09f;
-      gfx->fillCircle(CX + cosf(a) * 96, CY + sinf(a) * 80, 2, C_WHITE);
-    }
-  }
-}
 
 // Draw Clawd centered at (ccx,ccy) with sub-pixel size (sx,sy).
 void drawCreatureAt(int tick, int ccx, int ccy, int sx, int sy) {
@@ -379,10 +350,6 @@ void drawRimXP(float frac, int tick, bool celebrate) {
     return;
   }
   if (frac > 0) gfx->fillArc(CX, CY, RAD, RAD - 8, 0, frac * 360.0f, pet.accent);
-}
-
-String mmss(int secs) {
-  char b[8]; snprintf(b, sizeof(b), "%d:%02d", secs / 60, secs % 60); return b;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -843,6 +810,7 @@ void updateLeds() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 void setup() {
+  Serial.setRxBufferSize(2048);   // default 256 truncates larger state payloads
   Serial.begin(115200);
   strip.begin(); strip.setBrightness(140); strip.clear(); strip.show();
 #ifdef PIN_LCD_PWR
