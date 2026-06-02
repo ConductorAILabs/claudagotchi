@@ -234,11 +234,18 @@ def _food_uses(state: State) -> list[float]:
         state["food_uses"] = u
     return u
 
+def _food_recovery(state: State, now: float) -> float:
+    """How many "uses" each food has forgotten since food_ts (0+ , time-based)."""
+    return max(0.0, (now - state.get("food_ts", now)) / FOOD_RECOVER_S)
+
+def _food_eff(uses: float) -> float:
+    """Effectiveness 0..1 for a food with `uses` repeats remaining (clamped)."""
+    return max(FOOD_MIN_EFF, FOOD_DECAY ** max(0.0, uses))
+
 def food_effectiveness(state: State) -> list[float]:
     """Current 0..1 effectiveness for each food (after time recovery, no mutation)."""
-    u = _food_uses(state)
-    dec = max(0.0, (_now() - state.get("food_ts", _now())) / FOOD_RECOVER_S)
-    return [max(FOOD_MIN_EFF, FOOD_DECAY ** max(0.0, x - dec)) for x in u]
+    dec = _food_recovery(state, _now())
+    return [_food_eff(x - dec) for x in _food_uses(state)]
 
 def feed_food(state: State, idx: int) -> tuple[bool, str]:
     """Feed food #idx. Effectiveness drops the more you repeat the same food,
@@ -248,12 +255,12 @@ def feed_food(state: State, idx: int) -> tuple[bool, str]:
         return False, "no such food"
     u = _food_uses(state)
     now = _now()
-    dec = max(0.0, (now - state.get("food_ts", now)) / FOOD_RECOVER_S)
+    dec = _food_recovery(state, now)
     if dec > 0:                                   # apply time recovery to all foods
         u = [max(0.0, x - dec) for x in u]
         state["food_uses"] = u
     state["food_ts"] = now
-    eff  = max(FOOD_MIN_EFF, FOOD_DECAY ** u[idx])
+    eff  = _food_eff(u[idx])
     gain = int(FOODS[idx][1] * eff)
     u[idx] += 1.0
     feed(state, gain)
