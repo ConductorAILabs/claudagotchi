@@ -641,10 +641,16 @@ void onTouch(int x, int y) {
   switch (page) {
     case PG_HOME:  petHim(); return;
     case PG_STYLE: {                                   // tap a swatch in the grid
-      int col = (x < CX - 44) ? 0 : (x < CX) ? 1 : (x < CX + 44) ? 2 : 3;
-      int row = (y < 96) ? 0 : 1;
-      int idx = row * 4 + col;
-      if (idx >= 0 && idx < NSKIN) sendCmd(String("SKIN ") + idx);
+      // pick the swatch whose center is closest to the tap (forgiving — every
+      // swatch incl. the top-left orange is reliably reachable)
+      int best = 0; long bd = 0x7FFFFFFF;
+      for (int i = 0; i < NSKIN; i++) {
+        int sx = CX - 66 + (i % 4) * 44;
+        int sy = 50 + (i / 4) * 48 + 17;          // swatch center (matches drawStyle)
+        long dx = x - sx, dy = y - sy, d = dx * dx + dy * dy;
+        if (d < bd) { bd = d; best = i; }
+      }
+      sendCmd(String("SKIN ") + best);
       return;
     }
     case PG_QUEST:                                     // tap an offer to choose it
