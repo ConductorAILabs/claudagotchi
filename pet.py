@@ -200,16 +200,6 @@ def set_skin(state: State, idx: int) -> tuple[bool, str]:
         return True, SKINS[idx][0]
     return False, "locked"
 
-# FEED action: a manual treat (small food) with a short cooldown.
-SNACK_TOKENS   = 1500
-SNACK_COOLDOWN = 45.0
-def snack(state: State) -> tuple[bool, str]:
-    if _now() - state.get("last_snack_ts", 0) < SNACK_COOLDOWN:
-        return False, "still full"
-    state["last_snack_ts"] = _now()
-    feed(state, SNACK_TOKENS)
-    return True, f"snack +{SNACK_TOKENS}"
-
 # PET action: tap head/back/belly for a little XP. Same spot repeated = less;
 # mixing spots builds a streak, and a full head+back+belly cycle = a combo bonus.
 PET_SPOTS    = ["head", "back", "belly"]
@@ -474,7 +464,6 @@ def new_state() -> State:
         "lifetime_xp":     0,
         "spent_xp":        0,
         "level":           0,
-        "last_snack_ts":   0.0,
         "act_n":           0,
         "food_uses":       [0.0] * len(FOODS),
         "food_ts":         0.0,

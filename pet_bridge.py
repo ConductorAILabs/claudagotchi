@@ -119,11 +119,8 @@ def handle_cmd(line: str) -> bool:
         ok, msg = _run(lambda s: pet.start_quest(s, idx))
         print(f"[bridge] QUEST: {msg}", flush=True)
         return ok
-    if len(parts) >= 2 and parts[1] == "FEED":
-        if len(parts) >= 3 and parts[2].isdigit():
-            ok, msg = _run(lambda s: pet.feed_food(s, int(parts[2])))
-        else:
-            ok, msg = _run(pet.snack)
+    if len(parts) >= 3 and parts[1] == "FEED" and parts[2].isdigit():
+        ok, msg = _run(lambda s: pet.feed_food(s, int(parts[2])))
         print(f"[bridge] FEED: {msg}", flush=True)
         return ok
     return False
