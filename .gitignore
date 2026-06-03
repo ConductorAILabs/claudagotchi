@@ -4,3 +4,11 @@ firmware/*/build/
 __pycache__/
 *.pyc
 .DS_Store
+# local screen recordings — never publish
+*.mp4
+*.mov
+# inherited reference project (not part of claudagotchi)
+archive/
+# local pet state / backups (live in ~/.claude, but ignore here too just in case)
+claudagotchi*.json
+*.bak.json

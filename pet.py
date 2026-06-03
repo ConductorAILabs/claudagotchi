@@ -71,7 +71,11 @@ PROJECTS_ROOT = HOME / ".claude" / "projects"
 
 # ── tuning ───────────────────────────────────────────────────────────────────
 TOKENS_PER_XP = 1000       # 1 XP per 1000 tokens (input+output only — see tokens_today)
-LEVEL_BASE    = 50         # cumulative-XP curve constant: C(L) = LEVEL_BASE*(L-1)^2
+XP_PER_LEVEL  = 250        # flat curve: every level costs the same 250 XP (= 250k
+                           # tokens). A quadratic curve made high levels a multi-
+                           # million-token grind where the bar looked frozen; a flat
+                           # cost keeps every level visibly climbable.
+LEVEL_BASE    = XP_PER_LEVEL   # back-compat alias (older refs)
 EAT_WINDOW_S  = 3.0        # how long after a meal the viewer shows "eating"
 HIBERNATE_S   = 30 * 60    # idle this long with no food -> he sleeps
 
@@ -322,18 +326,18 @@ def tokens_today(projects_root: Path = PROJECTS_ROOT) -> int:
 
 # ── level math (0-based: a fresh pet is level 0) ──────────────────────────────
 def level_for_xp(xp: int) -> int:
-    """C(L) = LEVEL_BASE*L^2 is the cumulative XP to reach level L. Level 0 at xp 0."""
+    """Flat curve: level L starts at XP_PER_LEVEL*L. Level 0 at xp 0."""
     if xp <= 0:
         return 0
-    return int((xp / LEVEL_BASE) ** 0.5)
+    return int(xp // XP_PER_LEVEL)
 
 
 def xp_floor(level: int) -> int:
-    return LEVEL_BASE * level ** 2
+    return XP_PER_LEVEL * level
 
 
 def xp_ceiling(level: int) -> int:
-    return LEVEL_BASE * (level + 1) ** 2
+    return XP_PER_LEVEL * (level + 1)
 
 
 def level_progress(xp: int, level: int) -> tuple[int, int, float]:

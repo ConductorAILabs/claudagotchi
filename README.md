@@ -63,8 +63,8 @@ Then **feed him from real usage** (below) and he updates live.
 ### The 5 LEDs
 - spinning **comet** in his color = gaining XP/tokens (works even on a quest)
 - spinning **rainbow** = level up
-- slow **breathing glow** = away on a quest
-- **all‑flash ×3** = quest departs / returns
+- **all‑flash ×3** = quest departs / returns (then dark — no steady glow while away)
+- otherwise **off**
 
 ---
 

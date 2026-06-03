@@ -755,7 +755,12 @@ void parse(const String& line) {
       flash_msg = "+" + kfmt(pet.tokens - last_tokens);
       flash_until = millis() + 2200;
     }
-    if (pet.level > last_level) cheer_until = millis() + 2800;
+    if (pet.level > last_level) {
+      cheer_until = millis() + 4500;   // long enough to film the level-up rainbow
+      shown_frac  = 1.0f;        // snap the bar to full so a level-up reads as
+                                 // "filled up -> ding", then it eases into the
+                                 // new (near-empty) level instead of running back
+    }
   }
   last_actN = pet.actN;
   have_data = true;
@@ -764,11 +769,11 @@ void parse(const String& line) {
 
 // LED behavior (color comes from pet.ledColor — the EXACT 24-bit skin color,
 // gamma-corrected so it reads true on the WS2812s instead of washed/blue):
-//  - quest depart/arrive: ALL LEDs flash 3x in the skin color
+//  - quest depart/arrive: ALL LEDs flash 3x in the skin color (the ONLY quest LED)
 //  - XP/token gain:       spinning comet in the skin color (fires even on a quest)
 //  - level up:            spinning RAINBOW ring
-//  - on a quest (idle):   slow breathing glow in the skin color
-//  - otherwise:           off
+//  - otherwise:           off  (no steady glow while away — quest only flashes
+//                               on depart/return, then goes dark like normal)
 void updateLeds() {
   unsigned long now = millis();
   static int lastMode = -1;
@@ -777,35 +782,36 @@ void updateLeds() {
   uint8_t sg = Adafruit_NeoPixel::gamma8((pet.ledColor >> 8)  & 0xFF);
   uint8_t sb = Adafruit_NeoPixel::gamma8( pet.ledColor        & 0xFF);
 
+  // LEVEL-UP RAINBOW = highest priority: it overrides the comet, the quest flash,
+  // everything. (A level-up also trips token-activity, so without this the blue
+  // comet would stomp the rainbow.) Spins fast + full brightness so it's unmissable.
+  if (now < cheer_until) {
+    float head = fmodf(now / 40.0f, NUM_LEDS);       // faster spin than the comet
+    for (int i = 0; i < NUM_LEDS; i++) {
+      uint16_t hue = (uint16_t)(((i - head) / (float)NUM_LEDS) * 65536.0f);
+      strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(hue, 255, 255)));
+    }
+    strip.show(); lastMode = 2; return;
+  }
   if (now < quest_flash_until) {                     // flash-all 3x (depart/arrive)
     unsigned long elapsed = QUEST_FLASH_MS - (quest_flash_until - now);
     bool on = ((elapsed / 200) % 2) == 0;
     strip.fill(on ? strip.Color(sr, sg, sb) : 0);
     strip.show(); lastMode = 4; return;
   }
-  int mode = (now < eat_until) ? 1 : (now < cheer_until) ? 2 : (pet.questActive) ? 3 : 0;
-  if (mode == 0) {
+  // otherwise: spinning skin-color comet on token/XP gain, else off.
+  if (now >= eat_until) {
     if (lastMode != 0) { strip.clear(); strip.show(); }
     lastMode = 0; return;
-  }
-  if (mode == 3) {                                   // slow breathing glow while away
-    float p = 0.20f + 0.22f * sinf(now * 0.003f);
-    strip.fill(strip.Color(sr * p, sg * p, sb * p));
-    strip.show(); lastMode = 3; return;
   }
   float head = fmodf(now / 60.0f, NUM_LEDS);
   for (int i = 0; i < NUM_LEDS; i++) {
     float d = fabsf(i - head); d = fminf(d, NUM_LEDS - d);
-    if (mode == 2) {                                 // spinning rainbow (level up)
-      uint16_t hue = (uint16_t)(((i - head) / (float)NUM_LEDS) * 65536.0f);
-      strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(hue, 255, 255)));
-    } else {                                         // spinning skin-color comet (XP gain)
-      float br = fmaxf(0.06f, 1.0f - d * 0.55f);
-      strip.setPixelColor(i, strip.Color(sr * br, sg * br, sb * br));
-    }
+    float br = fmaxf(0.06f, 1.0f - d * 0.55f);
+    strip.setPixelColor(i, strip.Color(sr * br, sg * br, sb * br));
   }
   strip.show();
-  lastMode = mode;
+  lastMode = 1;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
