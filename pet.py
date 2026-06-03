@@ -45,9 +45,22 @@ from typing import Any, TypedDict
 # Snapshot: the read-only derived view of State the viewers consume (see snapshot).
 #           pet_bridge.slim() builds the firmware wire payload purely from this, so
 #           Snapshot is the single source the on-screen short-key schema derives from.
+class Stats(TypedDict):
+    """Derived combat stats — re-computed from level + upgrades, never stored."""
+    max_hp:  int
+    attack:  int
+    defense: int
+    speed:   int
+    crit:    float
+    type:    str
+
+class Offer(TypedDict):
+    """A single quest offer: away `min` minutes for `reward` XP."""
+    min:    int
+    reward: int
+
 State    = dict[str, Any]
 Card     = dict[str, Any]
-Stats    = dict[str, Any]
 Event    = dict[str, Any]
 Snapshot = dict[str, Any]
 
@@ -130,10 +143,10 @@ def quest_active(state: State) -> bool:
 def quest_remaining(state: State) -> int:
     return max(0, int(state["quest_end"] - _now())) if quest_active(state) else 0
 
-def gen_quest_offers(state: State) -> list:
+def gen_quest_offers(state: State) -> list[Offer]:
     """3 random {min, reward} offers; the reward/min rate varies so some are deals."""
     lvl = state["level"]
-    offers = []
+    offers: list[Offer] = []
     for _ in range(QUEST_OFFERS):
         mins = random.choice(QUEST_MINUTES)
         rate = random.uniform(0.6, 1.7)
@@ -150,7 +163,7 @@ def ensure_quest_offers(state: State) -> bool:
 def start_quest(state: State, idx: int = 0) -> tuple[bool, str]:
     if quest_active(state):
         return False, "already away"
-    offers = state.get("quest_offers") or gen_quest_offers(state)
+    offers: list[Offer] = state.get("quest_offers") or gen_quest_offers(state)
     o = offers[max(0, min(int(idx), len(offers) - 1))]
     state["quest_end"]    = _now() + o["min"] * 60
     state["quest_reward"] = int(o["reward"])
@@ -346,14 +359,14 @@ def combat_stats(level: int, upgrades: dict[str, int]) -> Stats:
     v = int(upgrades.get("vigor", 0))
     p = int(upgrades.get("power", 0))
     g = int(upgrades.get("guard", 0))
-    return {
+    return Stats({
         "max_hp":  20 + level * 4 + v * 5,
         "attack":  5 + level + p * 2,
         "defense": g * 2,
         "speed":   10 + level,                           # initiative
         "crit":    min(0.5, 0.03 + level * 0.003 + p * 0.004),
         "type":    "NORMAL",
-    }
+    })
 
 def stats(state: State) -> Stats:
     return combat_stats(state["level"], state.get("upgrades", {}))
