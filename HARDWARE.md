@@ -1,91 +1,88 @@
 # Claudagotchi on the round screen
 
-Target: **Seeed XIAO ESP32-S3** (or C3) + **GC9A01 240×240 round IPS**,
-capacitive touch (CST816S, I2C) + rotary encoder knob.
+Hardware: **Elecrow CrowPanel 1.28″ HMI ESP32‑S3 Rotary Display** — an
+ESP32‑S3R8 (8 MB PSRAM, 16 MB flash) with a round **GC9A01 240×240** IPS panel,
+**CST816** capacitive touch, a **rotary knob** (turn + press), and a **5× WS2812**
+RGB strip. It enumerates over native USB (no buttons needed to flash).
 
-The device only *renders*. The Mac brain (`pet.py`) owns all state; the bridge
-(`pet_bridge.py`) streams it over USB and applies the knob/touch commands the
-device sends back.
+The board only renders. The Mac brain (`pet.py`) owns all state; `pet_bridge.py`
+streams it over USB and applies the knob/touch commands the device sends back:
 
 ```
 real tokens ─▶ hook_feed.sh ─▶ pet.py (state) ─▶ pet_bridge.py ─USB─▶ round screen
                                           ▲                              │
-                                          └────── CMD BUY / PET ◀────────┘
+                                          └─ CMD FEED/TRAIN/PET/SKIN/QUEST ◀┘
 ```
 
-## 1. Wiring (XIAO S3 — pins set in the .ino CONFIG block)
+## Pin map (already wired on the board; set in the .ino CONFIG block)
 
-GC9A01 is **SPI** (the picture). Touch is **I2C**. The knob is 2 GPIOs + a button.
-GC9A01 is write-only, so the MISO pad (D9) is reused for the encoder.
+`BOARD_CROWPANEL_S3` in `firmware/claudagotchi_round/claudagotchi_round.ino`:
 
-| Screen pin | XIAO pad | GPIO (S3) | GPIO (C3) |
-|---|---|---|---|
-| SCK / CLK   | D8  | 7  | 8  |
-| SDA / MOSI  | D10 | 9  | 10 |
-| DC          | D3  | 4  | 5  |
-| CS          | D1  | 2  | 3  |
-| RST         | D0  | 1  | 2  |
-| BL (backlight) | D2 | 3 | 4 |
-| **Touch** SDA | D4 | 5 | 6 |
-| **Touch** SCL | D5 | 6 | 7 |
-| **Knob** A    | D9 | 8 | 9 |
-| **Knob** B    | D6 | 43 | 21 |
-| **Knob** SW (press) | D7 | 44 | 20 |
-| VCC → 3V3, GND → GND | — | — | — |
+| Function | GPIO |
+|---|---|
+| GC9A01 SCK | 10 |
+| GC9A01 MOSI | 11 |
+| GC9A01 DC | 3 |
+| GC9A01 CS | 9 |
+| GC9A01 RST | 14 |
+| Backlight (BL) | 46 |
+| **LCD power enable** | **1** (must be HIGH or the screen stays dark) |
+| Touch I2C SDA / SCL | 6 / 7  (CST816 @ `0x15`) |
+| Knob A / B / press | 45 / 42 / 41 |
+| WS2812 strip data | 48 (5 LEDs) |
 
-> Switching to a C3? In `claudagotchi_round.ino` set `BOARD_XIAO_S3 0` and
-> `BOARD_XIAO_C3 1`. If the panel has no touch or no knob, set `ENABLE_TOUCH 0`
-> / `ENABLE_ENCODER 0` — the screen still works fed over USB.
+(Pin blocks for a bare XIAO‑S3/C3 + GC9A01 module are also in the CONFIG section
+if you ever drive a different board — flip the `BOARD_*` defines.)
 
-## 2. Toolchain
+## Toolchain
 
 ```bash
 brew install arduino-cli
 arduino-cli core install esp32:esp32
-arduino-cli lib install "GFX Library for Arduino" "ArduinoJson"
+arduino-cli lib install "GFX Library for Arduino" "ArduinoJson" "Adafruit NeoPixel"
 pip3 install pyserial
 ```
 
-## 3. Build & flash
+## Build & flash
 
 ```bash
-cd ~/Desktop/claudagachi/firmware
-arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3 \
-  --build-path ./build_round ./claudagotchi_round
-arduino-cli upload  --fqbn esp32:esp32:XIAO_ESP32S3 \
-  -p /dev/cu.usbmodem1101 --input-dir ./build_round ./claudagotchi_round
+cd firmware
+PORT=$(ls /dev/cu.usbmodem* | head -1)
+arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3 --build-path ./build_round ./claudagotchi_round
+arduino-cli upload  --fqbn esp32:esp32:XIAO_ESP32S3 -p "$PORT" --input-dir ./build_round ./claudagotchi_round
 ```
 
-(For a C3 use `--fqbn esp32:esp32:XIAO_ESP32C3`.) You should see
-`CLAUDAGOTCHI / waiting for Mac…` on the circle.
+(The `XIAO_ESP32S3` fqbn just gives a working native‑USB CDC config; the actual
+pins come from the .ino. Flashing needs no buttons — native USB.) You should see
+`CLAUDAGOTCHI / waiting for Mac…` on the circle until the bridge connects.
 
-## 4. Run the bridge
+## Run it
 
 ```bash
-cd ~/Desktop/claudagachi
-python3 pet_bridge.py        # streams state + handles knob commands
+cd ..                 # repo root
+python3 install_hook.py     # feed him from real Claude Code usage (new session to take effect)
+python3 pet_bridge.py       # stream state to the screen + handle knob/touch (auto-detects the port)
 ```
 
-He should pop in immediately. Use Claude Code normally (with the feeder hook
-installed) and he eats your tokens live.
+`pet_bridge.py` auto-detects the `usbmodem` port (the S3 re-enumerates under
+slightly different names), survives USB unplugs, and reconnects on its own.
 
-## 5. Using it
+## Controls & LEDs
 
-- **Turn the knob** — switch pages: HOME ↺ STATS ↺ UPGRADES.
-- **Press the knob** — on UPGRADES, buy the selected upgrade (XP spent in the
-  real brain); elsewhere it flips to the next page.
-- **Tap the screen** — pet him on HOME (hearts); elsewhere advances the page.
-- **Eat / level up** — food flash + chew on HOME; the rim arc fills; a rainbow
-  sweep + cheer face on level-up.
-- **Idle** — he dims and falls asleep (Zzz).
+See the **Controls** and **LEDs** sections in [README.md](README.md) — knob =
+4‑screen carousel (HOME/ACTIONS/STYLE/QUEST), touch drives the menus, and the
+strip shows XP/level/quest activity in the active skin color.
 
-## Notes / first-flash gotchas
+## First-flash / tuning notes
 
-- **This firmware is v1 and has not been compiled on this machine** — flash it
-  and we'll iterate. Most likely tweaks: the exact touch IC address
-  (`CST816_ADDR`, try `0x15` then `0x2E`/`0x5A`) and encoder A/B direction.
-- If colors look swapped (blue creature), the panel wants BGR — flip with an
-  `Arduino_GC9A01(bus, RST, 0, true)` → add `, false, ...` BGR flag or invert in
-  the driver init.
-- On a C3, the 240×240 canvas (~115 KB) fits in SRAM; if it ever fails to
-  allocate, drop the `Arduino_Canvas` and draw straight to `out` (some flicker).
+- **Screen stuck on "waiting for Mac…"** — it's not getting a parseable payload.
+  The firmware sets `Serial.setRxBufferSize(2048)` so large state frames aren't
+  truncated; if you add many fields to the wire payload keep it well under that.
+- **Colors swapped (blue Clawd)** — the panel wants BGR; flip the color order in
+  the `Arduino_GC9A01(...)` init.
+- **Knob scrubs backwards** — swap `PIN_ENC_A` / `PIN_ENC_B`. (The knob is read on
+  hardware interrupts, so it shouldn't miss detents.)
+- **LED color looks off** — colors are gamma‑corrected from the exact 24‑bit skin
+  color; if your strip is RGB (not GRB) change `NEO_GRB` in the strip init.
+- **Touch taps land on the wrong item** — the touch X/Y is likely rotated vs the
+  display; adjust the mapping in `onTouch` / `pollTouch`.
