@@ -315,6 +315,9 @@ def tokens_today(projects_root: Path = PROJECTS_ROOT) -> int:
                             if ts < midnight_ts:
                                 continue
                         except ValueError:
+                            # Unparseable timestamp in an external session line:
+                            # we can't date-filter it, so fall through and still
+                            # count its tokens rather than dropping the line.
                             pass
                     for key, val in _PAT_TOK.findall(line):
                         # Count real work only — input + output. Cache-read tokens
